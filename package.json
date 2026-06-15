@@ -1,0 +1,21 @@
+{
+  "name": "wudu-goose-runner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "雾都飞升：暴走鹅跑酷。无外部依赖的 H5 跑酷小游戏，可直接部署到 GitHub Pages。",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "preview": "node scripts/serve.mjs dist",
+    "serve": "node scripts/serve.mjs src public",
+    "check": "node --check src/main.js && node --check scripts/build.mjs && node --check scripts/serve.mjs"
+  },
+  "keywords": [
+    "h5-game",
+    "runner",
+    "canvas",
+    "github-pages",
+    "tcamp"
+  ],
+  "license": "UNLICENSED"
+}

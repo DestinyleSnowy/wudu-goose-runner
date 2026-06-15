@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#10142e" />
+    <meta name="description" content="雾都飞升：暴走鹅跑酷——一款 8D 重庆风格的 H5 无尽跑酷小游戏。" />
+    <meta property="og:title" content="雾都飞升：暴走鹅跑酷" />
+    <meta property="og:description" content="轻轨穿楼、索道冲刺、火锅辣椒连击，带你的暴走鹅冲上排行榜。" />
+    <meta property="og:image" content="./assets/cover.png" />
+    <link rel="icon" href="./assets/icon-192.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <title>雾都飞升：暴走鹅跑酷</title>
+    <link rel="preload" as="image" href="./assets/characters/goose-18.webp" />
+    <link rel="preload" as="image" href="./assets/cover.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main id="app" aria-label="雾都飞升：暴走鹅跑酷">
+      <canvas id="gameCanvas" aria-label="游戏画面"></canvas>
+      <div class="scanline" aria-hidden="true"></div>
+      <div class="cornerGlow" aria-hidden="true"></div>
+
+      <section id="loading" class="screen screen--front" aria-live="polite">
+        <div class="brandMark">鹅</div>
+        <h1>雾都飞升</h1>
+        <p>正在把轻轨、火锅和暴走鹅塞进同一个 H5 页面……</p>
+        <div class="loader"><span id="loadBar"></span></div>
+        <small id="loadText">加载角色素材 0%</small>
+      </section>
+
+      <section id="menu" class="screen screen--menu hidden">
+        <div class="menuGrid">
+          <article class="heroCard glass">
+            <p class="eyebrow">8D 重庆 · 无尽跑酷 · 本地排行</p>
+            <h1>雾都飞升：<br />暴走鹅跑酷</h1>
+            <p class="lead">二段跳跨过轻轨天桥，下滑穿过霓虹招牌，攒满雾能后 Shift 一键冲刺破障。越到后面，平台越短、速度越快、机关越密。</p>
+            <div class="ctaRow">
+              <button id="startBtn" class="primaryBtn">开始飞升</button>
+              <button id="howBtn" class="ghostBtn">玩法说明</button>
+            </div>
+            <div class="statsStrip" aria-label="历史成绩">
+              <span><b id="bestScore">0</b><small>最佳分数</small></span>
+              <span><b id="bestDistance">0m</b><small>最远距离</small></span>
+              <span><b id="bestCombo">0x</b><small>最高连击</small></span>
+            </div>
+          </article>
+
+          <aside class="skinCard glass">
+            <div class="skinTopline">
+              <span>选择出战鹅</span>
+              <button id="randomSkinBtn" class="miniBtn">随机</button>
+            </div>
+            <div class="skinStage">
+              <button id="prevSkin" class="roundBtn" aria-label="上一个角色">‹</button>
+              <img id="skinPreview" alt="当前角色预览" />
+              <button id="nextSkin" class="roundBtn" aria-label="下一个角色">›</button>
+            </div>
+            <h2 id="skinName">轻轨穿梭鹅</h2>
+            <p id="skinTrait">起跑雾能 +10，适合冲分。</p>
+            <div class="miniGrid">
+              <span>空格 / ↑：二段跳</span>
+              <span>↓ / S：滑铲与速降</span>
+              <span>Shift / J：雾能冲刺</span>
+              <span>P / Esc：暂停</span>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="helpPanel" class="modal hidden" aria-modal="true" role="dialog" aria-labelledby="helpTitle">
+        <div class="glass modalContent">
+          <button class="closeBtn" data-close="helpPanel" aria-label="关闭">×</button>
+          <h2 id="helpTitle">怎么玩才像冠军作品</h2>
+          <p>这不是“只会跳”的示例版。游戏有动态难度、连击、护盾、磁吸、冲刺破障、移动平台、云梯坍塌、轻轨飞行障碍和本地最高分。</p>
+          <ul>
+            <li><b>跳跃：</b>空格、W、↑ 或触屏“跳”。空中可再跳一次。</li>
+            <li><b>滑铲：</b>S、↓ 或触屏“铲”。可以钻过低矮霓虹牌，空中按下会快速下坠。</li>
+            <li><b>冲刺：</b>Shift、J 或触屏“冲”。消耗雾能，短暂无敌并击碎障碍。</li>
+            <li><b>得分：</b>距离、辣椒、破障、无伤连击都会加分。保持连击会明显拉开分数。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="gameOver" class="modal hidden" aria-modal="true" role="dialog" aria-labelledby="overTitle">
+        <div class="glass modalContent overContent">
+          <h2 id="overTitle">本轮飞升结束</h2>
+          <p id="overReason">鹅被雾都地形教育了。</p>
+          <div class="resultGrid">
+            <span><b id="finalScore">0</b><small>分数</small></span>
+            <span><b id="finalDistance">0m</b><small>距离</small></span>
+            <span><b id="finalCombo">0x</b><small>最高连击</small></span>
+            <span><b id="finalChili">0</b><small>辣椒</small></span>
+          </div>
+          <p id="recordLine" class="recordLine">新纪录会自动保存到本地。</p>
+          <div class="ctaRow center">
+            <button id="restartBtn" class="primaryBtn">再来一局</button>
+            <button id="backMenuBtn" class="ghostBtn">回到菜单</button>
+          </div>
+        </div>
+      </section>
+
+      <header id="hud" class="hud hidden">
+        <div class="hudBlock scoreBlock">
+          <small>分数</small><b id="hudScore">0</b>
+        </div>
+        <div class="hudBlock">
+          <small>距离</small><b id="hudDistance">0m</b>
+        </div>
+        <div class="hudBlock">
+          <small>连击</small><b id="hudCombo">0x</b>
+        </div>
+        <div class="meterWrap" aria-label="雾能条">
+          <span>雾能</span>
+          <div class="meter"><i id="dashMeter"></i></div>
+        </div>
+        <div id="heartBox" class="heartBox" aria-label="生命值"></div>
+      </header>
+
+      <div id="badgeLine" class="badgeLine hidden"></div>
+      <button id="pauseBtn" class="pauseBtn hidden" aria-label="暂停游戏">Ⅱ</button>
+      <button id="soundBtn" class="soundBtn" aria-label="开关音效">音效</button>
+
+      <nav id="touchControls" class="touchControls hidden" aria-label="触屏操作">
+        <button data-touch="slide">铲</button>
+        <button data-touch="jump" class="jumpTouch">跳</button>
+        <button data-touch="dash">冲</button>
+      </nav>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

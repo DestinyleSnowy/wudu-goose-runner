@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#10142e" />
-    <meta name="description" content="雾都飞升：暴走鹅跑酷——一款 8D 重庆风格的 H5 无尽跑酷小游戏。" />
+    <meta name="description" content="雾都飞升：暴走鹅跑酷——一款 8D 重庆风格的 H5 双模式跑酷小游戏。" />
     <meta property="og:title" content="雾都飞升：暴走鹅跑酷" />
-    <meta property="og:description" content="轻轨穿楼、索道冲刺、火锅辣椒连击，带你的暴走鹅冲上排行榜。" />
+    <meta property="og:description" content="无尽刷分与极限追击双模式，轻轨穿楼、索道冲刺、火锅辣椒连击。" />
     <meta property="og:image" content="./assets/cover.png" />
     <link rel="icon" href="./assets/icon-192.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
@@ -32,17 +32,27 @@
       <section id="menu" class="screen screen--menu hidden">
         <div class="menuGrid">
           <article class="heroCard glass">
-            <p class="eyebrow">8D 重庆 · 无尽跑酷 · 本地排行</p>
+            <p class="eyebrow">8D 重庆 · 双模式跑酷 · 本地幽灵影子</p>
             <h1>雾都飞升：<br />暴走鹅跑酷</h1>
-            <p class="lead">二段跳跨过轻轨天桥，下滑穿过霓虹招牌，攒满雾能后 Shift 一键冲刺破障。越到后面，平台越短、速度越快、机关越密。</p>
+            <p class="lead">无尽跑酷负责刷高分，极限跑酷负责通关竞速。二段跳跨过轻轨天桥，下滑穿过霓虹招牌，攒满雾能后 Shift 一键冲刺破障；极限模式还会有“鹅追击值”、1888m 终点、评级与本地幽灵影子。</p>
+            <div class="modeSwitch" aria-label="选择游戏模式">
+              <button class="modeCard active" data-mode="endless">
+                <b>无尽跑酷</b>
+                <span>无限生成、连击冲分、越跑越难</span>
+              </button>
+              <button class="modeCard" data-mode="extreme">
+                <b>极限跑酷</b>
+                <span>1888m 追击关卡、通关评级、幽灵竞速</span>
+              </button>
+            </div>
             <div class="ctaRow">
-              <button id="startBtn" class="primaryBtn">开始飞升</button>
+              <button id="startBtn" class="primaryBtn">开始无尽</button>
               <button id="howBtn" class="ghostBtn">玩法说明</button>
             </div>
             <div class="statsStrip" aria-label="历史成绩">
-              <span><b id="bestScore">0</b><small>最佳分数</small></span>
-              <span><b id="bestDistance">0m</b><small>最远距离</small></span>
-              <span><b id="bestCombo">0x</b><small>最高连击</small></span>
+              <span><b id="bestScore">0</b><small id="bestScoreLabel">最佳分数</small></span>
+              <span><b id="bestDistance">0m</b><small id="bestDistanceLabel">最远距离</small></span>
+              <span><b id="bestCombo">0x</b><small id="bestComboLabel">最高连击</small></span>
             </div>
           </article>
 
@@ -72,12 +82,13 @@
         <div class="glass modalContent">
           <button class="closeBtn" data-close="helpPanel" aria-label="关闭">×</button>
           <h2 id="helpTitle">怎么玩才像冠军作品</h2>
-          <p>这不是“只会跳”的示例版。游戏有动态难度、连击、护盾、磁吸、冲刺破障、移动平台、云梯坍塌、轻轨飞行障碍和本地最高分。</p>
+          <p>这不是“只会跳”的示例版。游戏有无尽跑酷与极限跑酷两个模式：前者无限刷分，后者是 1888m 的限压追击关卡，包含追击值、检查点、终点评级和本地幽灵影子。</p>
           <ul>
             <li><b>跳跃：</b>空格、W、↑ 或触屏“跳”。空中可再跳一次。</li>
             <li><b>滑铲：</b>S、↓ 或触屏“铲”。可以钻过低矮霓虹牌，空中按下会快速下坠。</li>
             <li><b>冲刺：</b>Shift、J 或触屏“冲”。消耗雾能，短暂无敌并击碎障碍。</li>
             <li><b>得分：</b>距离、辣椒、破障、无伤连击都会加分。保持连击会明显拉开分数。</li>
+            <li><b>极限模式：</b>别让“鹅追击值”涨满，冲刺、连击、辣椒和检查点都能压低追击值；抵达 1888m 后按用时、生命和连击给出评级。</li>
           </ul>
         </div>
       </section>
@@ -96,6 +107,7 @@
           <div class="ctaRow center">
             <button id="restartBtn" class="primaryBtn">再来一局</button>
             <button id="backMenuBtn" class="ghostBtn">回到菜单</button>
+            <button id="shareBtn" class="ghostBtn">复制战报</button>
           </div>
         </div>
       </section>
@@ -113,6 +125,11 @@
         <div class="meterWrap" aria-label="雾能条">
           <span>雾能</span>
           <div class="meter"><i id="dashMeter"></i></div>
+        </div>
+        <div id="missionWrap" class="missionWrap hidden" aria-label="极限模式任务">
+          <span id="missionLabel">极限追击</span>
+          <b id="missionText">0m / 1888m</b>
+          <div class="threatMeter"><i id="threatMeter"></i></div>
         </div>
         <div id="heartBox" class="heartBox" aria-label="生命值"></div>
       </header>

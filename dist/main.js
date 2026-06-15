@@ -10,6 +10,7 @@ const ui = {
   menu: $('#menu'),
   startBtn: $('#startBtn'),
   howBtn: $('#howBtn'),
+  modeBtns: [...document.querySelectorAll('[data-mode]')],
   helpPanel: $('#helpPanel'),
   gameOver: $('#gameOver'),
   restartBtn: $('#restartBtn'),
@@ -22,16 +23,25 @@ const ui = {
   hudCombo: $('#hudCombo'),
   dashMeter: $('#dashMeter'),
   heartBox: $('#heartBox'),
+  missionWrap: $('#missionWrap'),
+  missionLabel: $('#missionLabel'),
+  missionText: $('#missionText'),
+  threatMeter: $('#threatMeter'),
   badgeLine: $('#badgeLine'),
   bestScore: $('#bestScore'),
   bestDistance: $('#bestDistance'),
   bestCombo: $('#bestCombo'),
+  bestScoreLabel: $('#bestScoreLabel'),
+  bestDistanceLabel: $('#bestDistanceLabel'),
+  bestComboLabel: $('#bestComboLabel'),
   finalScore: $('#finalScore'),
   finalDistance: $('#finalDistance'),
   finalCombo: $('#finalCombo'),
   finalChili: $('#finalChili'),
   overReason: $('#overReason'),
   recordLine: $('#recordLine'),
+  overTitle: $('#overTitle'),
+  shareBtn: $('#shareBtn'),
   skinPreview: $('#skinPreview'),
   skinName: $('#skinName'),
   skinTrait: $('#skinTrait'),
@@ -41,9 +51,53 @@ const ui = {
   touchControls: $('#touchControls'),
 };
 
-const STORAGE_KEY = 'wudu-goose-runner-record-v1';
+const LEGACY_STORAGE_KEY = 'wudu-goose-runner-record-v1';
+const STORAGE_KEY = 'wudu-goose-runner-record-v2';
 const SETTINGS_KEY = 'wudu-goose-runner-settings-v1';
+const MODE_KEY = 'wudu-goose-selected-mode';
 const isTouchDevice = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+
+const GAME_MODES = {
+  endless: {
+    id: 'endless',
+    name: '无尽跑酷',
+    startText: '开始无尽',
+    badge: '无尽跑酷：活得越久，连击越高，分数越夸张。',
+    baseSpeed: 292,
+    speedGrowth: 0.09,
+    maxSpeed: 610,
+    difficultyStart: 0,
+    difficultyScale: 1650,
+    difficultyMax: 1.6,
+    hpBase: 3,
+  },
+  extreme: {
+    id: 'extreme',
+    name: '极限跑酷',
+    startText: '挑战极限',
+    badge: '极限跑酷：1888m 追击关卡，别让鹅追击值涨满！',
+    baseSpeed: 326,
+    speedGrowth: 0.12,
+    maxSpeed: 675,
+    difficultyStart: 0.42,
+    difficultyScale: 1040,
+    difficultyMax: 2.18,
+    hpBase: 2,
+    finishDistance: 1888,
+    initialThreat: 18,
+    gates: [
+      { distance: 320, name: '轻轨穿楼', bonus: 320 },
+      { distance: 690, name: '洪崖洞低空', bonus: 420 },
+      { distance: 1050, name: '索道急坠', bonus: 520 },
+      { distance: 1420, name: '火锅蒸汽阵', bonus: 620 },
+      { distance: 1710, name: '解放碑终点冲刺', bonus: 800 },
+    ],
+  },
+};
+
+const MEDAL_RANK = { '未通关': 0, B: 1, A: 2, S: 3, SS: 4, SSS: 5 };
+let selectedMode = localStorage.getItem(MODE_KEY) || 'endless';
+if (!GAME_MODES[selectedMode]) selectedMode = 'endless';
 
 const SKINS = [
   { id: '05', file: 'goose-05.webp', name: '雾都巫师鹅', trait: '魔杖会把远处辣椒轻轻拽过来，磁吸半径 +14%。', mod: { magnetRadius: 1.14 } },
@@ -132,6 +186,15 @@ function makeRng(seed) {
   };
 }
 
+function seedFromString(text) {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
 function randRange(rng, min, max) {
   return min + (max - min) * rng();
 }
@@ -181,16 +244,59 @@ function colorWithAlpha(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+function defaultRecord() {
+  const skin = SKINS[selectedSkinIndex]?.id || '18';
+  return {
+    endless: { score: 0, distance: 0, combo: 0, skin },
+    extreme: { score: 0, distance: 0, combo: 0, bestTime: null, medal: '未通关', clears: 0, skin, ghost: [] },
+  };
+}
+
+function normalizeRecord(raw = {}) {
+  const base = defaultRecord();
+  const legacyLooksFlat = raw && ('score' in raw || 'distance' in raw || 'combo' in raw) && !raw.endless;
+  const merged = {
+    endless: { ...base.endless, ...(legacyLooksFlat ? raw : raw.endless || {}) },
+    extreme: { ...base.extreme, ...(raw.extreme || {}) },
+  };
+  if (!Array.isArray(merged.extreme.ghost)) merged.extreme.ghost = [];
+  if (!Number.isFinite(merged.extreme.bestTime)) merged.extreme.bestTime = null;
+  if (!MEDAL_RANK[merged.extreme.medal]) merged.extreme.medal = '未通关';
+  return merged;
+}
+
 function loadRecord() {
   try {
-    return { score: 0, distance: 0, combo: 0, skin: SKINS[selectedSkinIndex]?.id || '18', ...(JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}) };
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+    if (saved) return normalizeRecord(saved);
+    const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || 'null');
+    return normalizeRecord(legacy || {});
   } catch {
-    return { score: 0, distance: 0, combo: 0, skin: '18' };
+    return defaultRecord();
   }
 }
 
 function saveRecord(record) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(record));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeRecord(record)));
+}
+
+function formatTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '--';
+  return `${seconds.toFixed(2)}s`;
+}
+
+function compressGhostTrack(track) {
+  if (!Array.isArray(track) || !track.length) return [];
+  const result = [];
+  let lastTime = -999;
+  for (const point of track) {
+    if (!Number.isFinite(point.t) || !Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+    if (point.t - lastTime < 0.18 && result.length) continue;
+    result.push({ t: +point.t.toFixed(2), x: Math.round(point.x), y: Math.round(point.y) });
+    lastTime = point.t;
+    if (result.length >= 380) break;
+  }
+  return result;
 }
 
 function loadSettings() {
@@ -284,6 +390,8 @@ class Game {
     this.rng = makeRng(1);
     this.skylineSalt = Math.floor(Math.random() * 9000);
     this.record = loadRecord();
+    this.mode = selectedMode;
+    this.modeConfig = GAME_MODES[this.mode];
     this.selectedSkin = SKINS[selectedSkinIndex];
     this.platforms = [];
     this.obstacles = [];
@@ -296,6 +404,11 @@ class Game {
     this.badgeText = '';
     this.pauseHeld = false;
     this.previewGooseBob = 0;
+    this.extreme = null;
+    this.ghostTrack = [];
+    this.ghostSampleTimer = 0;
+    this.lastSummary = '';
+    this.won = false;
     this.initMenuScene();
   }
 
@@ -335,7 +448,13 @@ class Game {
 
   start() {
     sound.init();
-    const seed = (Date.now() ^ Math.floor(Math.random() * 0xFFFFFFFF)) >>> 0;
+    this.mode = selectedMode;
+    this.modeConfig = GAME_MODES[this.mode];
+    const today = new Date();
+    const dayKey = `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()}`;
+    const seed = this.mode === 'extreme'
+      ? seedFromString(`extreme-${dayKey}-${selectedSkinIndex}`)
+      : (Date.now() ^ Math.floor(Math.random() * 0xFFFFFFFF)) >>> 0;
     this.rng = makeRng(seed);
     this.state = 'playing';
     this.time = 0;
@@ -348,8 +467,8 @@ class Game {
     this.chili = 0;
     this.destroyed = 0;
     this.stageIndex = 0;
-    this.speed = 295;
-    this.difficulty = 0;
+    this.speed = this.modeConfig.baseSpeed;
+    this.difficulty = this.modeConfig.difficultyStart;
     this.lastPlatform = null;
     this.nextPlatformId = 1;
     this.platforms = [];
@@ -360,9 +479,27 @@ class Game {
     this.floatTexts = [];
     this.badgeTimer = 0;
     this.selectedSkin = SKINS[selectedSkinIndex];
+    this.extreme = null;
+    this.ghostTrack = [];
+    this.ghostSampleTimer = 0;
+    this.lastSummary = '';
+    this.won = false;
+
+    if (this.mode === 'extreme') {
+      const record = this.record.extreme || {};
+      this.extreme = {
+        time: 0,
+        threat: this.modeConfig.initialThreat,
+        finishDistance: this.modeConfig.finishDistance,
+        nextGate: 0,
+        gates: this.modeConfig.gates.map((gate) => ({ ...gate, x: gate.distance * 10, done: false })),
+        ghost: Array.isArray(record.ghost) ? record.ghost : [],
+        bestTime: record.bestTime || null,
+      };
+    }
 
     const baseY = this.floorY();
-    const hp = 3 + (this.selectedSkin.mod.hp || 0);
+    const hp = this.modeConfig.hpBase + (this.selectedSkin.mod.hp || 0);
     this.player = {
       x: 160,
       y: baseY - 86,
@@ -371,15 +508,15 @@ class Game {
       w: 56,
       h: 86,
       baseH: 86,
-      vx: 300,
+      vx: this.mode === 'extreme' ? 338 : 300,
       vy: 0,
       grounded: true,
       coyote: 0.1,
       jumps: 0,
       hp,
       maxHp: hp,
-      invuln: 1.1,
-      dashCharge: clamp(22 + (this.selectedSkin.mod.dashStart || 0), 0, 100),
+      invuln: this.mode === 'extreme' ? 0.9 : 1.1,
+      dashCharge: clamp((this.mode === 'extreme' ? 34 : 22) + (this.selectedSkin.mod.dashStart || 0), 0, 100),
       dashTime: 0,
       dashCooldown: 0,
       sliding: false,
@@ -392,12 +529,15 @@ class Game {
       landedPlatformId: null,
     };
 
-    const startPlatform = { x: -120, y: baseY, w: 980, h: 52, type: 'rail', id: this.nextPlatformId++, alpha: 1 };
+    const startPlatform = { x: -120, y: baseY, w: this.mode === 'extreme' ? 880 : 980, h: 52, type: 'rail', id: this.nextPlatformId++, alpha: 1 };
     this.platforms.push(startPlatform);
     this.lastPlatform = startPlatform;
-    this.addCoinLine(300, baseY - 100, 720, baseY - 120, 6, 'chili');
+    this.addCoinLine(300, baseY - 100, 720, baseY - 120, this.mode === 'extreme' ? 8 : 6, 'chili');
+    if (this.mode === 'extreme') {
+      this.powerups.push({ type: 'shield', x: 760, y: baseY - 150, baseY: baseY - 150, phase: 0.5, spin: 0 });
+    }
     this.generateUntil(this.width + 1800);
-    this.showBadge('雾都起跑！二段跳、滑铲、冲刺都能拿分');
+    this.showBadge(this.modeConfig.badge);
     this.syncHud();
     setPlayingUI(true);
   }
@@ -457,7 +597,8 @@ class Game {
     p.prevH = p.h;
 
     this.distanceMeters = Math.max(this.distanceMeters, Math.floor(p.x / 10));
-    this.difficulty = clamp(this.distanceMeters / 1650, 0, 1.6);
+    const cfg = this.modeConfig || GAME_MODES.endless;
+    this.difficulty = clamp(cfg.difficultyStart + this.distanceMeters / cfg.difficultyScale + (this.mode === 'extreme' ? (this.extreme?.time || 0) / 120 : 0), cfg.difficultyStart, cfg.difficultyMax);
     const nextStage = this.stageForDistance(this.distanceMeters);
     if (nextStage !== this.stageIndex) {
       this.stageIndex = nextStage;
@@ -467,8 +608,9 @@ class Game {
 
     const slowFactor = p.slow > 0 ? 0.68 : 1;
     const boostFactor = p.boost > 0 ? 1.16 : 1;
-    this.speed = (292 + this.distanceMeters * 0.09 + Math.sin(this.time * 0.9) * 6) * slowFactor * boostFactor;
-    this.speed = clamp(this.speed, 260, 610);
+    const tensionFactor = this.mode === 'extreme' ? 1 + (this.extreme?.threat || 0) * 0.0016 : 1;
+    this.speed = (cfg.baseSpeed + this.distanceMeters * cfg.speedGrowth + Math.sin(this.time * 0.9) * 6) * slowFactor * boostFactor * tensionFactor;
+    this.speed = clamp(this.speed, 260, cfg.maxSpeed);
 
     p.shield = Math.max(0, p.shield - safeDt);
     p.magnet = Math.max(0, p.magnet - safeDt);
@@ -490,13 +632,19 @@ class Game {
     this.updateParticles(safeDt);
 
     this.cameraX = Math.max(0, lerp(this.cameraX, p.x - this.width * 0.28, 0.12));
-    this.score += safeDt * (this.speed * 0.11 + Math.max(0, this.combo) * 0.7);
+    this.score += safeDt * (this.speed * 0.11 + Math.max(0, this.combo) * 0.7) * (this.mode === 'extreme' ? 1.12 : 1);
 
     if (this.combo > 0) {
       const grace = 1.95 + (this.selectedSkin.mod.comboGrace || 0);
       this.comboTimer = Math.max(0, this.comboTimer - safeDt);
       if (this.comboTimer <= 0) this.combo = 0;
       else this.comboTimer = Math.min(this.comboTimer, grace);
+    }
+
+    this.updateExtreme(safeDt);
+    if (this.state !== 'playing') {
+      this.syncHud();
+      return;
     }
 
     if (p.x < this.cameraX + 8 && p.invuln <= 0 && p.dashTime <= 0) {
@@ -511,6 +659,70 @@ class Game {
     this.generateUntil(this.cameraX + this.width + 1800);
     this.cleanup();
     this.syncHud();
+  }
+
+  updateExtreme(dt) {
+    if (this.mode !== 'extreme' || !this.extreme || !this.player || this.state !== 'playing') return;
+    const e = this.extreme;
+    const p = this.player;
+    e.time += dt;
+    e.threat += dt * (2.05 + this.difficulty * 1.35);
+    if (p.dashTime > 0) e.threat -= dt * 10.5;
+    if (p.boost > 0) e.threat -= dt * 3.4;
+    if (this.combo >= 10) e.threat -= dt * Math.min(5.2, this.combo * 0.075);
+    e.threat = clamp(e.threat, 0, 100);
+
+    this.ghostSampleTimer += dt;
+    if (this.ghostSampleTimer >= 0.2) {
+      this.ghostSampleTimer = 0;
+      this.ghostTrack.push({ t: e.time, x: p.x, y: p.y });
+    }
+
+    while (e.nextGate < e.gates.length && this.distanceMeters >= e.gates[e.nextGate].distance) {
+      const gate = e.gates[e.nextGate];
+      gate.done = true;
+      e.nextGate += 1;
+      e.threat = clamp(e.threat - 18, 0, 100);
+      p.dashCharge = clamp(p.dashCharge + 22, 0, 100);
+      this.addScore(gate.bonus, 'gate');
+      this.increaseCombo(4);
+      this.showBadge(`突破检查点「${gate.name}」 +${gate.bonus}，追击值下降`);
+      this.showFloatText(p.x + 80, p.y - 34, `CHECKPOINT +${gate.bonus}`, '#8dffcc');
+      this.addBurst(p.x + p.w / 2, p.y + p.h / 2, 42, '#8dffcc');
+      sound.power();
+    }
+
+    if (this.distanceMeters >= e.finishDistance) {
+      this.completeExtreme();
+      return;
+    }
+    if (e.threat >= 100) this.end('身后的暴走鹅追上来了：极限模式要用冲刺、辣椒和连击压低追击值。');
+  }
+
+  completeExtreme() {
+    if (this.state !== 'playing' || this.mode !== 'extreme' || !this.extreme) return;
+    const e = this.extreme;
+    e.threat = 0;
+    const timeBonus = Math.max(420, 2300 - e.time * 18);
+    const survivalBonus = (this.player?.hp || 0) * 360;
+    this.addScore(timeBonus + survivalBonus, 'finish');
+    this.won = true;
+    const medal = this.extremeMedal();
+    this.addBurst(this.player.x + this.player.w / 2, this.player.y + this.player.h / 2, 72, '#ffd45c');
+    this.end(`极限通关！用时 ${formatTime(e.time)}，评级 ${medal}。`, { won: true, medal });
+  }
+
+  extremeMedal() {
+    if (this.mode !== 'extreme' || !this.extreme) return '未通关';
+    const time = this.extreme.time;
+    const hp = this.player?.hp || 0;
+    const combo = this.maxCombo || 0;
+    const threat = this.extreme.threat || 0;
+    if (time <= 55 && hp >= 2 && combo >= 34 && threat < 42) return 'SSS';
+    if (time <= 64 && hp >= 1 && combo >= 25 && threat < 58) return 'SS';
+    if (time <= 74 && combo >= 16) return 'S';
+    if (time <= 88) return 'A';
+    return 'B';
   }
 
   updateAmbient(dt) {
@@ -751,6 +963,7 @@ class Game {
     this.addScore(value, 'coin');
     this.increaseCombo(1);
     this.player.dashCharge = clamp(this.player.dashCharge + 3.2 * mult, 0, 100);
+    if (this.mode === 'extreme' && this.extreme) this.extreme.threat = clamp(this.extreme.threat - 0.9 * mult, 0, 100);
     this.showFloatText(coin.x, coin.y - 20, mult > 1 ? `重庆辣椒 +${Math.floor(value)}` : `+${Math.floor(value)}`, '#ffd45c');
     this.addBurst(coin.x, coin.y, mult > 1 ? 18 : 8, '#ffd45c');
     sound.coin(this.combo);
@@ -764,6 +977,7 @@ class Game {
     if (power.type === 'slow') p.slow = Math.max(p.slow, 4.6);
     if (power.type === 'boost') p.boost = Math.max(p.boost, 4.2);
     this.addScore(160, 'power');
+    if (this.mode === 'extreme' && this.extreme) this.extreme.threat = clamp(this.extreme.threat - 8, 0, 100);
     this.increaseCombo(3);
     this.showBadge(`${POWER_LABEL[power.type]}！连击继续`);
     this.showFloatText(power.x, power.y - 20, `${POWER_LABEL[power.type]} +160`, '#8dffcc');
@@ -779,6 +993,7 @@ class Game {
     this.addScore(value, 'break');
     this.increaseCombo(3 + (this.selectedSkin.mod.comboOnBreak || 0));
     this.player.dashCharge = clamp(this.player.dashCharge + 8, 0, 100);
+    if (this.mode === 'extreme' && this.extreme) this.extreme.threat = clamp(this.extreme.threat - 5, 0, 100);
     this.showFloatText(obstacle.x, obstacle.y - 18, `${label} +${Math.floor(value)}`, '#ff7d42');
     this.addBurst(obstacle.x + obstacle.w / 2, obstacle.y + obstacle.h / 2, 30, '#ff7d42');
     sound.coin(9);
@@ -792,38 +1007,84 @@ class Game {
     p.vx = Math.max(this.speed * 0.72, p.vx * 0.72);
     p.vy = -360;
     this.combo = 0;
+    if (this.mode === 'extreme' && this.extreme) this.extreme.threat = clamp(this.extreme.threat + 18, 0, 100);
     this.addBurst(p.x + p.w / 2, p.y + p.h / 2, 30, '#ff4f6d');
     this.showBadge(`受击！剩余生命 ${Math.max(0, p.hp)}：${reason}`);
     sound.hit();
     if (p.hp <= 0) this.end(reason);
   }
 
-  end(reason) {
+  end(reason, options = {}) {
     if (this.state === 'gameover') return;
+    const won = Boolean(options.won);
     this.state = 'gameover';
     setPlayingUI(false);
-    this.addBurst(this.player.x + this.player.w / 2, this.player.y + this.player.h / 2, 44, '#ff4f6d');
-    sound.over();
+    if (this.player) this.addBurst(this.player.x + this.player.w / 2, this.player.y + this.player.h / 2, won ? 58 : 44, won ? '#ffd45c' : '#ff4f6d');
+    if (won) sound.power();
+    else sound.over();
 
     const finalScore = Math.floor(this.score);
     const finalDistance = Math.floor(this.distanceMeters);
     const finalCombo = Math.floor(this.maxCombo);
-    const record = { ...this.record };
+    const record = normalizeRecord(this.record);
+    const bucket = record[this.mode] || record.endless;
     let lines = [];
-    if (finalScore > (record.score || 0)) { record.score = finalScore; lines.push('分数新纪录'); }
-    if (finalDistance > (record.distance || 0)) { record.distance = finalDistance; lines.push('距离新纪录'); }
-    if (finalCombo > (record.combo || 0)) { record.combo = finalCombo; lines.push('连击新纪录'); }
-    record.skin = this.selectedSkin.id;
+
+    if (finalScore > (bucket.score || 0)) { bucket.score = finalScore; lines.push('分数新纪录'); }
+    if (finalDistance > (bucket.distance || 0)) { bucket.distance = finalDistance; lines.push('距离新纪录'); }
+    if (finalCombo > (bucket.combo || 0)) { bucket.combo = finalCombo; lines.push('连击新纪录'); }
+    bucket.skin = this.selectedSkin.id;
+
+    let recordLine = lines.length ? `恭喜：${lines.join('、')}！` : `最佳分数 ${formatNumber(bucket.score || 0)}，继续挑战连击路线。`;
+    if (this.mode === 'extreme') {
+      const runTime = this.extreme?.time || 0;
+      const medal = options.medal || (won ? this.extremeMedal() : '未通关');
+      const track = compressGhostTrack(this.ghostTrack);
+      const previousBestTime = bucket.bestTime;
+      const previousDistance = bucket.distance || 0;
+      if (won) {
+        bucket.clears = (bucket.clears || 0) + 1;
+        if (!previousBestTime || runTime < previousBestTime) {
+          bucket.bestTime = runTime;
+          lines.push('通关用时新纪录');
+        }
+        if (MEDAL_RANK[medal] > MEDAL_RANK[bucket.medal || '未通关']) {
+          bucket.medal = medal;
+          lines.push(`最高评级 ${medal}`);
+        }
+      }
+      const shouldSaveGhost = track.length && (
+        (won && (!previousBestTime || runTime <= previousBestTime || !bucket.ghost?.length)) ||
+        (!won && finalDistance >= previousDistance && finalDistance > 180) ||
+        (!bucket.ghost?.length && finalDistance > 240)
+      );
+      if (shouldSaveGhost) {
+        bucket.ghost = track;
+        lines.push('幽灵影子已保存');
+      }
+      recordLine = won
+        ? `极限用时 ${formatTime(runTime)}，评级 ${medal}。${lines.length ? lines.join('、') : '继续压缩通关路线！'}`
+        : `极限进度 ${finalDistance}/${this.modeConfig.finishDistance}m，追击值 ${Math.floor(this.extreme?.threat || 0)}%。${lines.length ? lines.join('、') : '冲刺和连击能压低追击值。'}`;
+      bucket.lastRun = { score: finalScore, distance: finalDistance, combo: finalCombo, time: +runTime.toFixed(2), medal, won };
+    }
+
+    record[this.mode] = bucket;
     this.record = record;
     saveRecord(this.record);
     updateMenuRecords(this.record);
 
+    ui.overTitle.textContent = this.mode === 'extreme' ? (won ? '极限通关！' : '极限挑战结束') : '本轮飞升结束';
     ui.finalScore.textContent = formatNumber(finalScore);
     ui.finalDistance.textContent = `${finalDistance}m`;
     ui.finalCombo.textContent = `${finalCombo}x`;
     ui.finalChili.textContent = formatNumber(this.chili);
-    ui.overReason.textContent = reason || '鹅被雾都地形教育了。';
-    ui.recordLine.textContent = lines.length ? `恭喜：${lines.join('、')}！` : `最佳分数 ${formatNumber(this.record.score || 0)}，继续挑战连击路线。`;
+    ui.overReason.textContent = reason || (won ? '你甩开了身后的暴走鹅。' : '鹅被雾都地形教育了。');
+    ui.recordLine.textContent = recordLine;
+
+    const modeName = GAME_MODES[this.mode]?.name || '跑酷';
+    this.lastSummary = this.mode === 'extreme'
+      ? `雾都飞升：暴走鹅跑酷｜${modeName}｜${won ? '通关' : '挑战'}｜分数 ${finalScore}｜距离 ${finalDistance}m｜用时 ${formatTime(this.extreme?.time || 0)}｜最高连击 ${finalCombo}x｜辣椒 ${this.chili}`
+      : `雾都飞升：暴走鹅跑酷｜${modeName}｜分数 ${finalScore}｜距离 ${finalDistance}m｜最高连击 ${finalCombo}x｜辣椒 ${this.chili}`;
     showModal(ui.gameOver);
   }
 
@@ -914,11 +1175,15 @@ class Game {
   generateChunk() {
     const prev = this.lastPlatform;
     const rng = this.rng;
-    const diff = clamp(this.difficulty, 0, 1.65);
+    const diff = clamp(this.difficulty, 0, this.mode === 'extreme' ? 2.18 : 1.65);
     const prevEnd = prev.x + prev.w;
     let gap = randRange(rng, 96 + diff * 30, 210 + diff * 58);
     let width = randRange(rng, 220 - diff * 42, 450 - diff * 82);
-    width = clamp(width, 132, 480);
+    if (this.mode === 'extreme') {
+      gap *= randRange(rng, 0.96, 1.12);
+      width *= randRange(rng, 0.84, 0.96);
+    }
+    width = clamp(width, this.mode === 'extreme' ? 118 : 132, 480);
     const minY = this.topY();
     const maxY = this.floorY();
     let y = clamp(prev.y + randRange(rng, -118, 94), minY, maxY);
@@ -926,6 +1191,7 @@ class Game {
     if (prev.type === 'spring') gap *= 1.14;
 
     let type = choose(rng, CHUNK_TYPES);
+    if (this.mode === 'extreme' && this.distanceMeters > 420 && rng() < 0.18) type = choose(rng, ['cloud', 'lift', 'rope', 'spring']);
     if (this.distanceMeters < 130) type = rng() < 0.65 ? 'stone' : 'rail';
     if (type === 'cloud' && diff < 0.25) type = 'stone';
     if (type === 'lift' || type === 'rope') width = Math.max(170, width * 0.82);
@@ -1004,8 +1270,9 @@ class Game {
   }
 
   addObstacleMaybe(platform, rng, diff) {
-    if (platform.x < 1100 || platform.w < 150) return;
-    const chance = 0.26 + diff * 0.28;
+    const minObstacleX = this.mode === 'extreme' ? 820 : 1100;
+    if (platform.x < minObstacleX || platform.w < 150) return;
+    const chance = this.mode === 'extreme' ? 0.40 + diff * 0.24 : 0.26 + diff * 0.28;
     if (rng() > chance) return;
     const typeRoll = rng();
     let obstacle;
@@ -1022,7 +1289,9 @@ class Game {
   }
 
   addPowerMaybe(platform, rng, diff) {
-    if (platform.x < 1200 || rng() > 0.105 + diff * 0.025) return;
+    const minPowerX = this.mode === 'extreme' ? 900 : 1200;
+    const chance = this.mode === 'extreme' ? 0.125 + diff * 0.028 : 0.105 + diff * 0.025;
+    if (platform.x < minPowerX || rng() > chance) return;
     const type = choose(rng, ['shield', 'magnet', 'slow', 'boost']);
     const x = platform.x + platform.w * randRange(rng, 0.28, 0.78);
     const y = platform.y - randRange(rng, 128, 185);
@@ -1042,6 +1311,16 @@ class Game {
     ui.hudDistance.textContent = `${Math.floor(this.distanceMeters || 0)}m`;
     ui.hudCombo.textContent = `${Math.floor(this.combo || 0)}x`;
     ui.dashMeter.style.width = `${Math.floor(this.player?.dashCharge || 0)}%`;
+    if (this.mode === 'extreme' && this.extreme && this.state !== 'menu') {
+      const remain = Math.max(0, this.extreme.finishDistance - Math.floor(this.distanceMeters || 0));
+      ui.missionWrap.classList.remove('hidden');
+      ui.missionLabel.textContent = '极限追击';
+      ui.missionText.textContent = `${formatTime(this.extreme.time)} · 剩 ${remain}m`;
+      ui.threatMeter.style.width = `${Math.floor(this.extreme.threat || 0)}%`;
+    } else {
+      ui.missionWrap.classList.add('hidden');
+      ui.threatMeter.style.width = '0%';
+    }
     const p = this.player;
     ui.heartBox.innerHTML = '';
     if (p) {
@@ -1058,6 +1337,7 @@ class Game {
     this.drawBackground(context, stage);
     this.drawWorld(context, stage);
     this.drawParticles(context);
+    this.drawGhost(context, stage);
     this.drawPlayer(context, stage);
     this.drawForeground(context, stage);
     if (this.state === 'paused') this.drawPauseOverlay(context);
@@ -1206,9 +1486,68 @@ class Game {
 
   drawWorld(context, stage) {
     for (const platform of this.platforms) this.drawPlatform(context, platform, stage);
+    this.drawExtremeMarkers(context, stage);
     for (const coin of this.coins) if (!coin.collected) this.drawCoin(context, coin, stage);
     for (const power of this.powerups) if (!power.collected) this.drawPower(context, power, stage);
     for (const obstacle of this.obstacles) if (!obstacle.destroyed) this.drawObstacle(context, obstacle, stage);
+  }
+
+  drawExtremeMarkers(context, stage) {
+    if (this.mode !== 'extreme' || !this.extreme) return;
+    const markers = [
+      ...this.extreme.gates,
+      { x: this.extreme.finishDistance * 10, name: '极限终点', distance: this.extreme.finishDistance, finish: true },
+    ];
+    context.save();
+    for (const marker of markers) {
+      const x = marker.x - this.cameraX;
+      if (x < -120 || x > this.width + 140) continue;
+      const top = this.topY() - 34;
+      const bottom = this.floorY() + 20;
+      const color = marker.finish ? '#ffd45c' : (marker.done ? '#8dffcc' : stage.glow);
+      context.globalAlpha = marker.done ? 0.42 : 0.86;
+      context.strokeStyle = color;
+      context.lineWidth = marker.finish ? 5 : 3;
+      context.setLineDash(marker.finish ? [] : [10, 8]);
+      context.beginPath();
+      context.moveTo(x, top);
+      context.lineTo(x, bottom);
+      context.stroke();
+      context.setLineDash([]);
+      fillRoundRect(context, x - 72, top - 28, 144, 36, 16, marker.finish ? 'rgba(255, 212, 92, 0.22)' : 'rgba(8, 12, 30, 0.72)');
+      strokeRoundRect(context, x - 72, top - 28, 144, 36, 16, colorWithAlpha(color, 0.74), 2);
+      context.fillStyle = marker.finish ? '#fff3ad' : color;
+      context.font = '900 15px "Microsoft YaHei", sans-serif';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(marker.finish ? '终点 1888m' : marker.name, x, top - 10);
+    }
+
+    const p = this.player;
+    if (p) {
+      const threat = this.extreme.threat || 0;
+      const chaseX = p.x - (360 - threat * 2.25) - this.cameraX;
+      if (chaseX > -160 && chaseX < this.width + 80) {
+        const chaseY = p.y + p.h * 0.5;
+        context.globalAlpha = 0.2 + threat * 0.004;
+        context.shadowColor = '#ff4f6d';
+        context.shadowBlur = 26;
+        context.fillStyle = 'rgba(7, 5, 12, 0.86)';
+        context.beginPath();
+        context.ellipse(chaseX, chaseY + 8, 52, 66, -0.1, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = '#ff4f6d';
+        context.beginPath();
+        context.arc(chaseX - 15, chaseY - 10, 7, 0, Math.PI * 2);
+        context.arc(chaseX + 15, chaseY - 10, 7, 0, Math.PI * 2);
+        context.fill();
+        context.shadowBlur = 0;
+        context.font = '900 16px "Microsoft YaHei", sans-serif';
+        context.textAlign = 'center';
+        context.fillText('别回头', chaseX, chaseY - 68);
+      }
+    }
+    context.restore();
   }
 
   drawPlatform(context, platform, stage) {
@@ -1461,6 +1800,41 @@ class Game {
     context.restore();
   }
 
+  drawGhost(context, stage) {
+    if (this.mode !== 'extreme' || !this.extreme || !Array.isArray(this.extreme.ghost) || this.extreme.ghost.length < 2) return;
+    const track = this.extreme.ghost;
+    const t = this.extreme.time;
+    if (t < track[0].t || t > track[track.length - 1].t + 0.4) return;
+    let hi = track.findIndex((point) => point.t >= t);
+    if (hi <= 0) hi = 1;
+    const p0 = track[hi - 1];
+    const p1 = track[Math.min(hi, track.length - 1)];
+    const mix = invLerp(p0.t, p1.t, t);
+    const worldX = lerp(p0.x, p1.x, mix);
+    const y = lerp(p0.y, p1.y, mix);
+    const x = worldX - this.cameraX;
+    if (x < -120 || x > this.width + 120) return;
+    const skin = this.selectedSkin || SKINS[selectedSkinIndex];
+    const img = assets.images.get(skin.file);
+    context.save();
+    context.globalAlpha = 0.24;
+    context.shadowColor = stage.glow;
+    context.shadowBlur = 20;
+    context.translate(x + 28, y + 44);
+    context.rotate(-0.06);
+    if (img) {
+      const drawH = 108;
+      const drawW = drawH * (img.width / img.height);
+      context.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    } else {
+      context.fillStyle = colorWithAlpha(stage.glow, 0.75);
+      context.beginPath();
+      context.ellipse(0, 0, 28, 40, 0, 0, Math.PI * 2);
+      context.fill();
+    }
+    context.restore();
+  }
+
   drawPlayer(context, stage) {
     const skin = this.selectedSkin || SKINS[selectedSkinIndex];
     const img = assets.images.get(skin.file);
@@ -1584,6 +1958,16 @@ class Game {
       }
     }
 
+    if (this.mode === 'extreme' && this.extreme?.threat > 58) {
+      const pulse = (this.extreme.threat - 58) / 42;
+      context.globalAlpha = clamp(pulse * (0.18 + Math.sin(this.time * 9) * 0.04), 0, 0.26);
+      const danger = context.createRadialGradient(this.width / 2, this.height / 2, this.height * 0.18, this.width / 2, this.height / 2, this.height * 0.78);
+      danger.addColorStop(0, 'rgba(255, 79, 109, 0)');
+      danger.addColorStop(1, 'rgba(255, 79, 109, 0.92)');
+      context.fillStyle = danger;
+      context.fillRect(0, 0, this.width, this.height);
+    }
+
     // 底部雾气
     const fog = context.createLinearGradient(0, this.height * 0.72, 0, this.height);
     fog.addColorStop(0, 'rgba(255,255,255,0)');
@@ -1612,9 +1996,36 @@ class Game {
 const game = new Game();
 
 function updateMenuRecords(record = game.record) {
-  ui.bestScore.textContent = formatNumber(record.score || 0);
-  ui.bestDistance.textContent = `${Math.floor(record.distance || 0)}m`;
-  ui.bestCombo.textContent = `${Math.floor(record.combo || 0)}x`;
+  const normalized = normalizeRecord(record);
+  const modeRecord = normalized[selectedMode] || normalized.endless;
+  if (selectedMode === 'extreme') {
+    ui.bestScoreLabel.textContent = '极限最高分';
+    ui.bestDistanceLabel.textContent = modeRecord.bestTime ? '最佳通关' : '最远进度';
+    ui.bestComboLabel.textContent = '最高评级';
+    ui.bestScore.textContent = formatNumber(modeRecord.score || 0);
+    ui.bestDistance.textContent = modeRecord.bestTime ? formatTime(modeRecord.bestTime) : `${Math.floor(modeRecord.distance || 0)}m`;
+    ui.bestCombo.textContent = modeRecord.medal || '未通关';
+  } else {
+    ui.bestScoreLabel.textContent = '最佳分数';
+    ui.bestDistanceLabel.textContent = '最远距离';
+    ui.bestComboLabel.textContent = '最高连击';
+    ui.bestScore.textContent = formatNumber(modeRecord.score || 0);
+    ui.bestDistance.textContent = `${Math.floor(modeRecord.distance || 0)}m`;
+    ui.bestCombo.textContent = `${Math.floor(modeRecord.combo || 0)}x`;
+  }
+}
+
+function selectMode(mode) {
+  if (!GAME_MODES[mode]) return;
+  selectedMode = mode;
+  game.mode = mode;
+  game.modeConfig = GAME_MODES[mode];
+  localStorage.setItem(MODE_KEY, selectedMode);
+  ui.modeBtns.forEach((button) => {
+    button.classList.toggle('active', button.dataset.mode === selectedMode);
+  });
+  ui.startBtn.textContent = GAME_MODES[selectedMode].startText;
+  updateMenuRecords(game.record);
 }
 
 function updateSkinUI() {
@@ -1633,6 +2044,7 @@ function setPlayingUI(playing) {
   ui.hud.classList.toggle('hidden', !playing);
   ui.pauseBtn.classList.toggle('hidden', !playing);
   ui.touchControls.classList.toggle('hidden', !(playing && isTouchDevice));
+  if (!playing) ui.missionWrap.classList.add('hidden');
 }
 
 function showModal(node) {
@@ -1743,13 +2155,35 @@ function bindInputs() {
   });
 }
 
+async function copyBattleReport() {
+  const fallback = '雾都飞升：暴走鹅跑酷｜双模式 H5 跑酷小游戏｜无尽刷分 + 极限追击';
+  const text = game.lastSummary || fallback;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    textarea.remove();
+  }
+  const old = ui.shareBtn.textContent;
+  ui.shareBtn.textContent = '已复制';
+  setTimeout(() => { ui.shareBtn.textContent = old; }, 1200);
+}
+
 function bindUI() {
   ui.startBtn.addEventListener('click', startFromMenu);
   ui.restartBtn.addEventListener('click', startFromMenu);
+  ui.modeBtns.forEach((button) => button.addEventListener('click', () => selectMode(button.dataset.mode)));
   ui.backMenuBtn.addEventListener('click', () => game.goMenu());
   ui.howBtn.addEventListener('click', () => showModal(ui.helpPanel));
   ui.pauseBtn.addEventListener('click', () => game.togglePause());
   ui.soundBtn.addEventListener('click', () => sound.toggle());
+  ui.shareBtn.addEventListener('click', copyBattleReport);
   ui.prevSkin.addEventListener('click', () => { selectedSkinIndex -= 1; updateSkinUI(); });
   ui.nextSkin.addEventListener('click', () => { selectedSkinIndex += 1; updateSkinUI(); });
   ui.randomSkinBtn.addEventListener('click', () => { selectedSkinIndex = Math.floor(Math.random() * SKINS.length); updateSkinUI(); });
@@ -1785,13 +2219,14 @@ async function boot() {
   resizeCanvas();
   bindUI();
   bindInputs();
-  updateMenuRecords(game.record);
+  selectMode(selectedMode);
   updateSkinUI();
   requestAnimationFrame(renderFrame);
   await loadAssets();
   ui.loading.classList.add('hidden');
   ui.menu.classList.remove('hidden');
   game.state = 'menu';
+  selectMode(selectedMode);
   updateSkinUI();
 }
 
